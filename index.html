@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <style>
+        /*canvas{
+           -moz-transform: scale(1, -1);
+           -webkit-transform: scale(1, -1);
+           -o-transform: scale(1, -1);
+           transform: scale(1, -1);
+           filter: FlipV;
+        }*/
+    </style>
+  </head>
+
+  <body>
+    <div>
+    </div>
+    <center>
+      <button id="bitchmode">bitchmode</button><br>
+      <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+    </center>
+    <script type='text/javascript'>
+      let canvas = document.getElementById('canvas');
+      var Module = {
+          canvas: canvas,
+      };
+    </script>
+    <script src="game.js"></script>
+    <script>
+      document.getElementById("bitchmode").onclick = ()=>{
+              Module.ccall(
+                      "launchit",  // name of C function
+                      null,  // return type
+                      null,  // argument types
+                      null,  // arguments
+                    );
+            };
+            
+    </script>
+  </body>
+</html>

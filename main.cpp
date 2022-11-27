@@ -92,8 +92,10 @@ int main(void)
                                        -position[2]};
         cameras[i].fovy = (1/(2.0*atan(views[i].projectionMatrix[5] )))/PI*180;
         logger((std::string("FOV:")+std::to_string(cameras[i].fovy)).c_str());
-        cameras[i].target=Vector3RotateByQuaternion(Vector3{0,0,-1}, 
-                         Quaternion{rotation[0],rotation[1],rotation[2],rotation[3]});
+        Quaternion headsetRotation = Quaternion{rotation[0],rotation[1],rotation[2],rotation[3]};
+        cameras[i].target=Vector3RotateByQuaternion(Vector3{0,0,-1},headsetRotation);
+
+        cameras[i].up = Vector3RotateByQuaternion((Vector3){ 0.0f, 1.0f, 0.0f },headsetRotation);
         BeginMode3D(cameras[i]);
         DrawCube((Vector3){-0.0f, 0.0f, -18.0f}, 3.0f, 5.0f, 3.0f, RED);
         EndMode3D();

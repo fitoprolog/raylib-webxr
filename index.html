@@ -19,7 +19,8 @@
     <div>
     </div>
     <center>
-      <button id="bitchmode">bitchmode</button><br>
+      <button id="vrmode">Launch VR</button>
+      <button id="armode">Launch AR</button><br>
       <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
     </center>
     <script type='text/javascript'>
@@ -30,7 +31,19 @@
     </script>
     <script src="game.js"></script>
     <script>
-      document.getElementById("bitchmode").onclick = ()=>{
+      // Add WebXR debugging
+      console.log("WebXR debugging enabled");
+      
+      // Override console.log to also show on page for debugging
+      const originalLog = console.log;
+      console.log = function(...args) {
+        originalLog.apply(console, args);
+        // You can uncomment this line to also show logs on the webpage
+        // document.body.innerHTML += '<br>' + args.join(' ');
+      };
+    </script>
+    <script>
+      document.getElementById("vrmode").onclick = ()=>{
               Module.ccall(
                       "launchit",  // name of C function
                       null,  // return type
@@ -39,6 +52,14 @@
                     );
             };
             
+      document.getElementById("armode").onclick = ()=>{
+              Module.ccall(
+                      "launch_ar",  // name of C function
+                      null,  // return type
+                      null,  // argument types
+                      null,  // arguments
+                    );
+            };
     </script>
   </body>
 </html>

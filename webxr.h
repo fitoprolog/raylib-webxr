@@ -54,7 +54,51 @@ typedef struct WebXRInputSource {
     int id;
     WebXRHandedness handedness;
     WebXRTargetRayMode targetRayMode;
+    int hasHand;        /**< 1 if this input source has hand tracking, 0 otherwise */
+    int hasController;  /**< 1 if this input source has controller/gamepad, 0 otherwise */
 } WebXRInputSource;
+
+/** WebXR Hand Joint indices (matches the 25 joints in the WebXR Hand Input specification) */
+enum WebXRHandJoint {
+    WEBXR_HAND_JOINT_WRIST = 0,
+    WEBXR_HAND_JOINT_THUMB_METACARPAL = 1,
+    WEBXR_HAND_JOINT_THUMB_PHALANX_PROXIMAL = 2,
+    WEBXR_HAND_JOINT_THUMB_PHALANX_DISTAL = 3,
+    WEBXR_HAND_JOINT_THUMB_TIP = 4,
+    WEBXR_HAND_JOINT_INDEX_FINGER_METACARPAL = 5,
+    WEBXR_HAND_JOINT_INDEX_FINGER_PHALANX_PROXIMAL = 6,
+    WEBXR_HAND_JOINT_INDEX_FINGER_PHALANX_INTERMEDIATE = 7,
+    WEBXR_HAND_JOINT_INDEX_FINGER_PHALANX_DISTAL = 8,
+    WEBXR_HAND_JOINT_INDEX_FINGER_TIP = 9,
+    WEBXR_HAND_JOINT_MIDDLE_FINGER_METACARPAL = 10,
+    WEBXR_HAND_JOINT_MIDDLE_FINGER_PHALANX_PROXIMAL = 11,
+    WEBXR_HAND_JOINT_MIDDLE_FINGER_PHALANX_INTERMEDIATE = 12,
+    WEBXR_HAND_JOINT_MIDDLE_FINGER_PHALANX_DISTAL = 13,
+    WEBXR_HAND_JOINT_MIDDLE_FINGER_TIP = 14,
+    WEBXR_HAND_JOINT_RING_FINGER_METACARPAL = 15,
+    WEBXR_HAND_JOINT_RING_FINGER_PHALANX_PROXIMAL = 16,
+    WEBXR_HAND_JOINT_RING_FINGER_PHALANX_INTERMEDIATE = 17,
+    WEBXR_HAND_JOINT_RING_FINGER_PHALANX_DISTAL = 18,
+    WEBXR_HAND_JOINT_RING_FINGER_TIP = 19,
+    WEBXR_HAND_JOINT_PINKY_FINGER_METACARPAL = 20,
+    WEBXR_HAND_JOINT_PINKY_FINGER_PHALANX_PROXIMAL = 21,
+    WEBXR_HAND_JOINT_PINKY_FINGER_PHALANX_INTERMEDIATE = 22,
+    WEBXR_HAND_JOINT_PINKY_FINGER_PHALANX_DISTAL = 23,
+    WEBXR_HAND_JOINT_PINKY_FINGER_TIP = 24,
+    WEBXR_HAND_JOINT_COUNT = 25
+};
+
+/** WebXR Hand Joint Pose (32 bytes: position[3] + rotation[4] + radius[1]) */
+typedef struct WebXRHandJointPose {
+    float position[3];    /**< Joint position in meters */
+    float rotation[4];    /**< Joint rotation as quaternion (x, y, z, w) */
+    float radius;         /**< Joint radius in meters */
+} WebXRHandJointPose;
+
+/** WebXR Hand data for one hand (25 joints) */
+typedef struct WebXRHandData {
+    WebXRHandJointPose joints[WEBXR_HAND_JOINT_COUNT];
+} WebXRHandData;
 
 /**
 Callback for errors
@@ -71,8 +115,9 @@ Callback for frame rendering
 @param time Current frame time
 @param modelMatrix Transformation of the XR Device to tracking origin
 @param views Array of two @ref WebXRView
+@param handData Pointer to hand tracking data (2 hands * 25 joints * 32 bytes + 8 bytes for flags)
 */
-typedef void (*webxr_frame_callback_func)(void* userData, int time, float modelMatrix[16], WebXRView views[2]);
+typedef void (*webxr_frame_callback_func)(void* userData, int time, float modelMatrix[16], WebXRView views[2], void* handData);
 
 /**
 Callback for VR session start
@@ -165,6 +210,61 @@ Get input pose. Can only be called during the frame callback.
 @param outPose Where to store the pose.
 */
 extern void webxr_get_input_pose(WebXRInputSource* source, float* outMatrix);
+
+/**
+Check if hand tracking is currently supported and active.
+
+@return 1 if hand tracking is supported, 0 otherwise
+*/
+extern int webxr_is_hand_tracking_supported();
+
+/**
+Get the pose of a specific hand joint. Can only be called during the frame callback.
+
+@param handedness 0 for left hand, 1 for right hand
+@param jointIndex Joint index from @ref WebXRHandJoint
+@param outPosePtr Pointer to receive joint pose data (32 bytes: pos[3] + rot[4] + radius[1])
+@return 1 if successful, 0 otherwise
+*/
+extern int webxr_get_hand_joint_pose(int handedness, int jointIndex, float* outPosePtr);
+
+/**
+Extract hand data from the frame callback hand data parameter.
+
+@param handData Hand data pointer from frame callback
+@param handedness 0 for left hand, 1 for right hand
+@param outHandData Pointer to receive hand data
+@return 1 if hand is detected, 0 otherwise
+*/
+static inline int webxr_get_hand_data(void* handData, int handedness, WebXRHandData* outHandData) {
+    if (!handData || !outHandData) return 0;
+    
+    // Hand detection flags are at the end of the data
+    int* flags = (int*)((char*)handData + (2 * 25 * 32));
+    int leftHandDetected = flags[0];
+    int rightHandDetected = flags[1];
+    
+    if ((handedness == 0 && !leftHandDetected) || (handedness == 1 && !rightHandDetected)) {
+        return 0; // Hand not detected
+    }
+    
+    // Copy hand data
+    WebXRHandData* sourceHand = (WebXRHandData*)((char*)handData + (handedness * 25 * 32));
+    *outHandData = *sourceHand;
+    return 1;
+}
+
+/**
+Check if the current session is an AR session.
+
+@return 1 if AR session, 0 otherwise
+*/
+extern int webxr_is_ar_session();
+
+/**
+Request an AR session instead of VR. Must be called from user activation event.
+*/
+extern void webxr_request_ar_session();
 
 }
 

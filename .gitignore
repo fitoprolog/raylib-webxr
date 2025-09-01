@@ -1,0 +1,123 @@
+# Build artifacts
+*.html
+*.js
+*.wasm
+*.data
+!index.html
+!library_webxr.js
+
+# Compiled binaries
+*.exe
+*.out
+*.app
+*.o
+*.so
+*.dylib
+*.dll
+
+# Emscripten specific
+*.bc
+*.mem
+*.symbols
+*.js.mem
+*.js.symbols
+
+# Cache and temporary files
+.cache/
+cache/
+*.tmp
+*.temp
+*.log
+
+# Development tools
+compile_commands.json
+.ccls-cache/
+.clangd/
+.vscode/
+.vs/
+.idea/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Package managers
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Raylib specific (if building raylib from source)
+raylib/src/*.a
+raylib/src/*.so
+raylib/src/*.dylib
+raylib/src/*.dll
+
+# IDE and editor files
+*.sublime-project
+*.sublime-workspace
+.kate-swp
+.swp
+
+# Profiling and debugging
+gmon.out
+*.prof
+*.gprof
+callgrind.out.*
+massif.out.*
+helgrind.out.*
+drd.out.*
+
+# Test coverage
+*.gcov
+*.gcda
+*.gcno
+coverage/
+lcov.info
+
+# Documentation build
+docs/_build/
+docs/html/
+docs/latex/
+*.pdf
+
+# Archive files
+*.zip
+*.tar.gz
+*.tar.bz2
+*.7z
+*.rar
+
+# Temporary build directories
+build/
+dist/
+temp/
+tmp/
+
+# Game-specific resources that might be large or generated
+# resources/generated/
+# assets/temp/
+
+# WebXR development server files (if using any)
+.webpack/
+webpack-dev-server.log

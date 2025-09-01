@@ -3,6 +3,23 @@ var LibraryWebXR = {
 $WebXR: {
     _coordinateSystem: null,
     _curRAF: null,
+    _handTrackingSupported: false,
+    _selectCallback: null,
+    _selectStartCallback: null,
+    _selectEndCallback: null,
+    _selectUserData: null,
+    _selectStartUserData: null,
+    _selectEndUserData: null,
+    
+    // WebXR Hand Joint indices (25 joints per hand)
+    _HAND_JOINTS: [
+        'wrist',
+        'thumb-metacarpal', 'thumb-phalanx-proximal', 'thumb-phalanx-distal', 'thumb-tip',
+        'index-finger-metacarpal', 'index-finger-phalanx-proximal', 'index-finger-phalanx-intermediate', 'index-finger-phalanx-distal', 'index-finger-tip',
+        'middle-finger-metacarpal', 'middle-finger-phalanx-proximal', 'middle-finger-phalanx-intermediate', 'middle-finger-phalanx-distal', 'middle-finger-tip',
+        'ring-finger-metacarpal', 'ring-finger-phalanx-proximal', 'ring-finger-phalanx-intermediate', 'ring-finger-phalanx-distal', 'ring-finger-tip',
+        'pinky-finger-metacarpal', 'pinky-finger-phalanx-proximal', 'pinky-finger-phalanx-intermediate', 'pinky-finger-phalanx-distal', 'pinky-finger-tip'
+    ],
 
     _nativize_vec3: function(offset, vec) {
         setValue(offset    , vec[0], 'float');
@@ -19,6 +36,67 @@ $WebXR: {
 
         return offset + 16*4;
     },
+    
+    _nativize_hand_joints: function(offset, hand, frame, coordinateSystem) {
+        if (!hand || !frame || !coordinateSystem) {
+            // Fill with zeros if no hand data
+            for (let i = 0; i < 25; i++) {
+                // Position (3 floats)
+                setValue(offset + i * 32, 0.0, 'float');
+                setValue(offset + i * 32 + 4, 0.0, 'float');
+                setValue(offset + i * 32 + 8, 0.0, 'float');
+                // Rotation (4 floats)
+                setValue(offset + i * 32 + 12, 0.0, 'float');
+                setValue(offset + i * 32 + 16, 0.0, 'float');
+                setValue(offset + i * 32 + 20, 0.0, 'float');
+                setValue(offset + i * 32 + 24, 1.0, 'float');
+                // Radius (1 float)
+                setValue(offset + i * 32 + 28, 0.0, 'float');
+            }
+            return offset + 25 * 32;
+        }
+        
+        for (let i = 0; i < WebXR._HAND_JOINTS.length && i < 25; i++) {
+            const jointName = WebXR._HAND_JOINTS[i];
+            try {
+                const jointPose = frame.getJointPose(hand.get(jointName), coordinateSystem);
+                
+                if (jointPose) {
+                    const pos = jointPose.transform.position;
+                    const rot = jointPose.transform.orientation;
+                    
+                    // Position (3 floats)
+                    setValue(offset + i * 32, pos.x, 'float');
+                    setValue(offset + i * 32 + 4, pos.y, 'float');
+                    setValue(offset + i * 32 + 8, pos.z, 'float');
+                    
+                    // Rotation (4 floats - quaternion)
+                    setValue(offset + i * 32 + 12, rot.x, 'float');
+                    setValue(offset + i * 32 + 16, rot.y, 'float');
+                    setValue(offset + i * 32 + 20, rot.z, 'float');
+                    setValue(offset + i * 32 + 24, rot.w, 'float');
+                    
+                    // Radius (1 float)
+                    setValue(offset + i * 32 + 28, jointPose.radius || 0.01, 'float');
+                } else {
+                    // Fill with zeros if joint pose is not available
+                    for (let j = 0; j < 8; j++) {
+                        setValue(offset + i * 32 + j * 4, 0.0, 'float');
+                    }
+                    setValue(offset + i * 32 + 24, 1.0, 'float'); // w component of quaternion
+                }
+            } catch (e) {
+                console.warn(`Failed to get pose for joint ${jointName}:`, e);
+                // Fill with zeros on error
+                for (let j = 0; j < 8; j++) {
+                    setValue(offset + i * 32 + j * 4, 0.0, 'float');
+                }
+                setValue(offset + i * 32 + 24, 1.0, 'float'); // w component of quaternion
+            }
+        }
+        
+        return offset + 25 * 32;
+    },
     /* Sets input source values to offset and returns pointer after struct */
     _nativize_input_source: function(offset, inputSource, id) {
         var handedness = -1;
@@ -29,11 +107,18 @@ $WebXR: {
         if(inputSource.targetRayMode == "tracked-pointer") targetRayMode = 1;
         else if(inputSource.targetRayMode == "screen") targetRayMode = 2;
 
+        var hasHand = inputSource.hand ? 1 : 0;
+        var hasController = (inputSource.gamepad || inputSource.targetRaySpace) ? 1 : 0;
+
         setValue(offset, id, 'i32');
         offset +=4;
         setValue(offset, handedness, 'i32');
         offset +=4;
         setValue(offset, targetRayMode, 'i32');
+        offset +=4;
+        setValue(offset, hasHand, 'i32');
+        offset +=4;
+        setValue(offset, hasController, 'i32');
         offset +=4;
 
         return offset;
@@ -45,14 +130,30 @@ $WebXR: {
         if(!callback) return;
 
         s.addEventListener(event, function(e) {
-            /* Nativize input source */
-            var inputSource = Module._malloc(8); // 2*sizeof(int32)
-            WebXR._nativize_input_source(inputSource, e.inputSource, i);
+            console.log(`WebXR input event: ${event}`);
+            
+            /* Allocate memory for WebXRInputSource struct (5 int32s) */
+            var inputSourceStruct = Module._malloc(20); // 5*sizeof(int32)
+            
+            /* Find the input source index */
+            var inputSourceIndex = -1;
+            for (let i = 0; i < s.inputSources.length; i++) {
+                if (s.inputSources[i] === e.inputSource) {
+                    inputSourceIndex = i;
+                    break;
+                }
+            }
+            
+            if (inputSourceIndex >= 0) {
+                WebXR._nativize_input_source(inputSourceStruct, e.inputSource, inputSourceIndex);
 
-            /* Call native callback */
-            dynCall('vii', callback, [inputSource, userData]);
+                /* Call native callback */
+                dynCall('vii', callback, [inputSourceStruct, userData]);
+            } else {
+                console.warn('Could not find input source index for event');
+            }
 
-            _free(inputSource);
+            Module._free(inputSourceStruct);
         });
     },
 
@@ -82,6 +183,9 @@ webxr_init: function(mode, frameCallback, startSessionCallback, endSessionCallba
         if(!startSessionCallback) return;
         dynCall('vi', startSessionCallback, [userData]);
     };
+    
+    // Store session mode for later use
+    Module['webxr_session_mode'] = mode;
 
     function onFrame(time, frame) {
         if(!frameCallback) return;
@@ -124,6 +228,30 @@ webxr_init: function(mode, frameCallback, startSessionCallback, endSessionCallba
         const modelMatrix = views + SIZE_OF_WEBXR_VIEW*2;
         WebXR._nativize_matrix(modelMatrix, pose.transform.matrix);
         
+        // Allocate memory for hand tracking data (2 hands * 25 joints * 32 bytes per joint)
+        const handDataSize = 2 * 25 * 32;
+        const handData = Module._malloc(handDataSize + 8); // +8 for hand detection flags
+        
+        // Check for hand tracking support and collect hand data
+        let leftHandDetected = 0;
+        let rightHandDetected = 0;
+        
+        for (const inputSource of session.inputSources) {
+            if (inputSource.hand) {
+                if (inputSource.handedness === 'left') {
+                    leftHandDetected = 1;
+                    WebXR._nativize_hand_joints(handData, inputSource.hand, frame, WebXR._coordinateSystem);
+                } else if (inputSource.handedness === 'right') {
+                    rightHandDetected = 1;
+                    WebXR._nativize_hand_joints(handData + 25 * 32, inputSource.hand, frame, WebXR._coordinateSystem);
+                }
+            }
+        }
+        
+        // Set hand detection flags at the end of hand data
+        setValue(handData + handDataSize, leftHandDetected, 'i32');
+        setValue(handData + handDataSize + 4, rightHandDetected, 'i32');
+        
         Module.ctx.bindFramebuffer(Module.ctx.FRAMEBUFFER,
             glLayer.framebuffer);
         /* HACK: This is not generally necessary, but chrome seems to detect whether the
@@ -133,14 +261,16 @@ webxr_init: function(mode, frameCallback, startSessionCallback, endSessionCallba
 
         /* Set and reset environment for webxr_get_input_pose calls */
         Module['webxr_frame'] = frame;
-        dynCall('viiii', frameCallback, [userData, time, modelMatrix, views]);
+        dynCall('viiiii', frameCallback, [userData, time, modelMatrix, views, handData]);
         Module['webxr_frame'] = null;
 
         _free(views);
+        _free(handData);
     };
 
     function onSessionStarted(session) {
         Module['webxr_session'] = session;
+        Module['webxr_on_session_started'] = onSessionStarted;
 
         // React to session ending
         session.addEventListener('end', function() {
@@ -153,6 +283,17 @@ webxr_init: function(mode, frameCallback, startSessionCallback, endSessionCallba
         // Give application a chance to react to session starting
         // e.g. finish current desktop frame.
         onSessionStart();
+        
+        // Register input callbacks if they were set before session started
+        if (WebXR._selectCallback) {
+            WebXR._set_input_callback('select', WebXR._selectCallback, WebXR._selectUserData);
+        }
+        if (WebXR._selectStartCallback) {
+            WebXR._set_input_callback('selectstart', WebXR._selectStartCallback, WebXR._selectStartUserData);
+        }
+        if (WebXR._selectEndCallback) {
+            WebXR._set_input_callback('selectend', WebXR._selectEndCallback, WebXR._selectEndUserData);
+        }
 
         // Ensure our context can handle WebXR rendering
         Module.ctx.makeXRCompatible().then(function() {
@@ -172,10 +313,33 @@ webxr_init: function(mode, frameCallback, startSessionCallback, endSessionCallba
     };
 
     if(navigator.xr) {
+        const sessionModes = ['inline', 'immersive-vr', 'immersive-ar'];
+        const sessionMode = sessionModes[mode];
+        
         // Check if XR session is supported
-        navigator.xr.isSessionSupported((['inline', 'immersive-vr', 'immersive-ar'])[mode]).then(function() {
+        navigator.xr.isSessionSupported(sessionMode).then(function() {
             Module['webxr_request_session_func'] = function() {
-                navigator.xr.requestSession('immersive-vr').then(onSessionStarted);
+                // Define required features based on session mode
+                let requiredFeatures = [];
+                let optionalFeatures = ['hand-tracking'];
+                
+                if (sessionMode === 'immersive-ar') {
+                    optionalFeatures.push('hit-test', 'plane-detection');
+                }
+                
+                const sessionInit = {
+                    requiredFeatures: requiredFeatures,
+                    optionalFeatures: optionalFeatures
+                };
+                
+                navigator.xr.requestSession(sessionMode, sessionInit).then(onSessionStarted).catch(function(err) {
+                    console.warn('Failed to start XR session with optional features, trying without:', err);
+                    // Fallback without optional features
+                    navigator.xr.requestSession(sessionMode, {requiredFeatures: requiredFeatures}).then(onSessionStarted).catch(function(err2) {
+                        console.error('Failed to start XR session:', err2);
+                        onError(-4);
+                    });
+                });
             };
         }, function() {
             onError(-4);
@@ -213,13 +377,28 @@ webxr_set_session_focus_callback: function(callback, userData) {
 },
 
 webxr_set_select_callback: function(callback, userData) {
-    WebXR._set_input_callback("select", callback, userData);
+    WebXR._selectCallback = callback;
+    WebXR._selectUserData = userData;
+    // If session already exists, register immediately
+    if (Module['webxr_session']) {
+        WebXR._set_input_callback("select", callback, userData);
+    }
 },
 webxr_set_select_start_callback: function(callback, userData) {
-    WebXR._set_input_callback("selectstart", callback, userData);
+    WebXR._selectStartCallback = callback;
+    WebXR._selectStartUserData = userData;
+    // If session already exists, register immediately
+    if (Module['webxr_session']) {
+        WebXR._set_input_callback("selectstart", callback, userData);
+    }
 },
 webxr_set_select_end_callback: function(callback, userData) {
-    WebXR._set_input_callback("selectend", callback, userData);
+    WebXR._selectEndCallback = callback;
+    WebXR._selectEndUserData = userData;
+    // If session already exists, register immediately
+    if (Module['webxr_session']) {
+        WebXR._set_input_callback("selectend", callback, userData);
+    }
 },
 
 webxr_get_input_sources: function(outArrayPtr, max, outCountPtr) {
@@ -254,6 +433,92 @@ webxr_get_input_pose: function(source, outPosePtr) {
     /* WebXRInputPose */
     //offset = WebXR._nativize_matrix(offset, pose.gripMatrix);
     //setValue(offset, pose.emulatedPosition, 'i32');
+},
+
+webxr_is_hand_tracking_supported: function() {
+    var s = Module['webxr_session'];
+    if (!s) return 0;
+    
+    // Check if any input source has hand tracking
+    for (const inputSource of s.inputSources) {
+        if (inputSource.hand) {
+            return 1;
+        }
+    }
+    return 0;
+},
+
+webxr_get_hand_joint_pose: function(handedness, jointIndex, outPosePtr) {
+    var f = Module['webxr_frame'];
+    if (!f) return 0;
+    
+    var s = Module['webxr_session'];
+    if (!s) return 0;
+    
+    const handednessStr = handedness === 0 ? 'left' : 'right';
+    
+    for (const inputSource of s.inputSources) {
+        if (inputSource.handedness === handednessStr && inputSource.hand) {
+            if (jointIndex >= 0 && jointIndex < WebXR._HAND_JOINTS.length) {
+                const jointName = WebXR._HAND_JOINTS[jointIndex];
+                try {
+                    const jointPose = f.getJointPose(inputSource.hand.get(jointName), WebXR._coordinateSystem);
+                    if (jointPose) {
+                        const pos = jointPose.transform.position;
+                        const rot = jointPose.transform.orientation;
+                        
+                        // Position (3 floats)
+                        setValue(outPosePtr, pos.x, 'float');
+                        setValue(outPosePtr + 4, pos.y, 'float');
+                        setValue(outPosePtr + 8, pos.z, 'float');
+                        
+                        // Rotation (4 floats - quaternion)
+                        setValue(outPosePtr + 12, rot.x, 'float');
+                        setValue(outPosePtr + 16, rot.y, 'float');
+                        setValue(outPosePtr + 20, rot.z, 'float');
+                        setValue(outPosePtr + 24, rot.w, 'float');
+                        
+                        // Radius (1 float)
+                        setValue(outPosePtr + 28, jointPose.radius || 0.01, 'float');
+                        
+                        return 1; // Success
+                    }
+                } catch (e) {
+                    console.warn(`Failed to get pose for joint ${jointName}:`, e);
+                }
+            }
+            break;
+        }
+    }
+    return 0; // Failed
+},
+
+webxr_is_ar_session: function() {
+    return Module['webxr_session_mode'] === 2 ? 1 : 0; // WEBXR_SESSION_MODE_IMMERSIVE_AR = 2
+},
+
+webxr_request_ar_session: function() {
+    if (navigator.xr) {
+        const sessionInit = {
+            requiredFeatures: [],
+            optionalFeatures: ['hit-test', 'plane-detection', 'hand-tracking']
+        };
+        
+        navigator.xr.requestSession('immersive-ar', sessionInit).then(function(session) {
+            Module['webxr_session_mode'] = 2;
+            
+            // Call onSessionStarted directly if available, otherwise use the stored function
+            if (typeof onSessionStarted === 'function') {
+                onSessionStarted(session);
+            } else if (Module['webxr_on_session_started']) {
+                Module['webxr_on_session_started'](session);
+            } else {
+                console.warn('No session started handler available');
+            }
+        }).catch(function(err) {
+            console.error('Failed to start AR session:', err);
+        });
+    }
 },
 
 };

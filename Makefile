@@ -5,8 +5,8 @@ OUTPUT = $(TARGET).html
 RAYLIB_PATH = ../raylib
 RAYLIB_LIB = $(RAYLIB_PATH)/src/libraylib.a
 
-# Main source file
-SOURCES = main.cpp
+# Main source files
+SOURCES = main.cpp VRHandler.cpp
 
 # All cpp files (for reference)
 ALL_SOURCES = $(wildcard *.cpp)
